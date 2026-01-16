@@ -23,7 +23,9 @@ async function request(path, { method = "GET", body } = {}) {
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
 
   if (!res.ok) {
-    const msg = data?.error ? (typeof data.error === "string" ? data.error : JSON.stringify(data.error)) : "Request failed";
+    const msg = data?.error
+      ? (typeof data.error === "string" ? data.error : JSON.stringify(data.error))
+      : "Request failed";
     throw new Error(msg);
   }
   return data;
@@ -36,11 +38,16 @@ export const api = {
   createRide: (payload) => request("/api/rides", { method: "POST", body: payload }),
   myRides: () => request("/api/rides/my"),
 
+  // ✅ NEW Uber-style accept route (if backend supports it)
+  acceptRide: (rideId) => request(`/api/rides/${rideId}/accept`, { method: "POST" }),
+
   driverOnline: () => request("/api/driver/online", { method: "POST" }),
   driverOffline: () => request("/api/driver/offline", { method: "POST" }),
   driverLocation: (payload) => request("/api/driver/location", { method: "POST", body: payload }),
-  driverAccept: (payload) => request("/api/driver/accept", { method: "POST", body: payload }),
-  driverStatus: (payload) => request("/api/driver/status", { method: "POST", body: payload }),
 
+  // ✅ Keep old accept route too (so nothing breaks)
+  driverAccept: (payload) => request("/api/driver/accept", { method: "POST", body: payload }),
+
+  driverStatus: (payload) => request("/api/driver/status", { method: "POST", body: payload }),
   adminRides: () => request("/api/admin/rides")
 };
