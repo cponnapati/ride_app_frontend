@@ -44,6 +44,7 @@ export const api = {
   driverOnline: () => request("/api/driver/online", { method: "POST" }),
   driverOffline: () => request("/api/driver/offline", { method: "POST" }),
   driverLocation: (payload) => request("/api/driver/location", { method: "POST", body: payload }),
+  driverAvailableRides: () => request("/api/driver/available-rides"),
 
   // ✅ Keep old accept route too (so nothing breaks)
   driverAccept: (payload) => request("/api/driver/accept", { method: "POST", body: payload }),

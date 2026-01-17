@@ -1,0 +1,23 @@
+--- a/UBER_BACKEND_FINAL/src/routes/driver.js
++++ b/UBER_BACKEND_FINAL/src/routes/driver.js
+@@ -48,6 +48,20 @@
+ 
+   bus.emitDriverLocation(req.auth.sub, parsed.data.lat, parsed.data.lng);
+   res.json({ profile });
++});
++
++// List available rides for drivers (no more copy/paste ride IDs)
++router.get("/available-rides", requireRole("DRIVER"), async (req, res) => {
++  const rides = await prisma.ride.findMany({
++    where: {
++      status: "REQUESTED",
++      driverId: null
++    },
++    orderBy: { createdAt: "desc" },
++    include: rideWithUsersInclude
++  });
++
++  res.json({ rides });
+ });
+ 
+ const acceptSchema = z.object({ rideId: z.string() });

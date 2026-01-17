@@ -4,6 +4,7 @@ import { session } from "./api";
 import { connectSocket } from "./socket";
 import { Toast } from "./ui/Toast";
 
+import LandingPage from "./pages/LandingPage.jsx";
 import AuthPage from "./pages/AuthPage.jsx";
 import RiderPage from "./pages/RiderPage.jsx";
 import DriverPage from "./pages/DriverPage.jsx";
@@ -16,52 +17,78 @@ function RequireAuth({ children, role }) {
   if (role && me.role !== role) {
     if (me.role === "RIDER") return <Navigate to="/rider" replace />;
     if (me.role === "DRIVER") return <Navigate to="/driver" replace />;
-    if (me.role === "ADMIN") return <Navigate to="/admin" replace />;
+    return <Navigate to="/admin" replace />;
   }
+
   return children;
 }
 
 export default function App() {
-  const [toast, setToast] = useState({ message: "", type: "info" });
-
-  const socket = useMemo(() => {
-    if (!session.token) return null;
-    return connectSocket();
-  }, [session.token]);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
-    if (!socket) return;
+    // connect socket only when authenticated
+    if (!session.token) return;
+    const s = connectSocket();
+    return () => {
+      try {
+        s?.disconnect?.();
+      } catch {}
+    };
+  }, []);
 
-    socket.on("ride:new", () => setToast({ message: "New ride requested (for drivers).", type: "info" }));
-    socket.on("ride:update", (r) => setToast({ message: `Ride updated: ${r.status}`, type: "success" }));
-    socket.on("connect_error", (e) => setToast({ message: e.message || "Socket error", type: "error" }));
-
-    return () => socket.disconnect();
-  }, [socket]);
+  const toastApi = useMemo(() => {
+    return {
+      show: (message, kind = "info") => setToast({ message, kind }),
+      clear: () => setToast(null),
+    };
+  }, []);
 
   return (
     <>
-      <Toast
-        message={toast.message}
-        type={toast.type}
-        onClose={() => setToast({ message: "", type: "info" })}
-      />
+      {toast && (
+        <Toast
+          kind={toast.kind}
+          onClose={() => toastApi.clear()}
+        >
+          {toast.message}
+        </Toast>
+      )}
+
       <Routes>
-        <Route path="/auth" element={<AuthPage />} />
-        <Route path="/rider" element={<RequireAuth role="RIDER"><RiderPage /></RequireAuth>} />
-        <Route path="/driver" element={<RequireAuth role="DRIVER"><DriverPage /></RequireAuth>} />
-        <Route path="/admin" element={<RequireAuth role="ADMIN"><AdminPage /></RequireAuth>} />
-        <Route path="/" element={<HomeRedirect />} />
+        {/* NEW Uber-like landing */}
+        <Route path="/" element={<LandingPage />} />
+
+        {/* existing auth + dashboards */}
+        <Route path="/auth" element={<AuthPage toast={toastApi} />} />
+
+        <Route
+          path="/rider"
+          element={
+            <RequireAuth role="RIDER">
+              <RiderPage toast={toastApi} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/driver"
+          element={
+            <RequireAuth role="DRIVER">
+              <DriverPage toast={toastApi} />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <RequireAuth role="ADMIN">
+              <AdminPage toast={toastApi} />
+            </RequireAuth>
+          }
+        />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );
-}
-
-function HomeRedirect() {
-  const me = session.me;
-  if (!session.token || !me) return <Navigate to="/auth" replace />;
-  if (me.role === "RIDER") return <Navigate to="/rider" replace />;
-  if (me.role === "DRIVER") return <Navigate to="/driver" replace />;
-  return <Navigate to="/admin" replace />;
 }

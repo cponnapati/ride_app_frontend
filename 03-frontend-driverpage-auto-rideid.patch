@@ -1,0 +1,114 @@
+--- a/UBER_FRONTEND_FINAL/src/pages/DriverPage.jsx
++++ b/UBER_FRONTEND_FINAL/src/pages/DriverPage.jsx
+@@ -7,6 +7,7 @@
+ 
+ export default function DriverPage() {
+   const [rides, setRides] = useState([]);
++  const [availableRides, setAvailableRides] = useState([]);
+   const [online, setOnline] = useState(false);
+   const [rideId, setRideId] = useState("");
+   const [statusRideId, setStatusRideId] = useState("");
+@@ -17,8 +18,16 @@
+   const [err, setErr] = useState("");
+ 
+   async function refresh() {
+-    const data = await api.myRides();
+-    setRides(data.rides);
++    const [my, available] = await Promise.all([
++      api.myRides(),
++      api.driverAvailableRides().catch(() => ({ rides: [] }))
++    ]);
++
++    setRides(my.rides);
++    setAvailableRides(available.rides);
++
++    // Preselect newest ride for quick accept
++    if (!rideId && available.rides?.[0]?.id) setRideId(available.rides[0].id);
+   }
+ 
+   useEffect(() => {
+@@ -46,8 +55,17 @@
+       });
+     });
+ 
+-    socket.on("ride:new", () => {
+-      // optional: refresh().catch(() => {});
++    socket.on("ride:new", (payload) => {
++      const ride = payload?.ride ?? payload;
++      if (!ride?.id) return;
++
++      setAvailableRides((prev) => {
++        if (prev.some((r) => r.id === ride.id)) return prev;
++        return [ride, ...prev];
++      });
++
++      // Auto-select newest ride if nothing selected
++      setRideId((cur) => cur || ride.id);
+     });
+ 
+     return () => {
+@@ -99,11 +117,18 @@
+     setErr("");
+     setMsg("");
+ 
++    if (!rideId) {
++      setErr("No available ride selected.");
++      return;
++    }
++
+     try {
+       // ✅ Use your existing backend driver accept route
+       await api.driverAccept({ rideId });
+ 
+       setMsg("Ride accepted.");
++      setStatusRideId(rideId);
++      setAvailableRides((prev) => prev.filter((r) => r.id !== rideId));
+       await refresh();
+     } catch (e) {
+       setErr(e.message || String(e));
+@@ -181,12 +206,23 @@
+           <div className="grid lg:grid-cols-2 gap-6">
+             <div className="grid gap-3">
+               <div className="font-semibold text-slate-900">Accept ride</div>
+-              <Input
+-                label="Ride ID"
++              <Select
++                label="Available rides"
+                 value={rideId}
+                 onChange={(e) => setRideId(e.target.value)}
+-                placeholder="Paste ride id..."
+-              />
++              >
++                <option value="">Select a ride...</option>
++                {availableRides.map((r) => (
++                  <option key={r.id} value={r.id}>
++                    {r.id} — {r.rider?.email || "rider"}
++                  </option>
++                ))}
++              </Select>
++              <div className="text-xs text-slate-500">
++                {availableRides.length
++                  ? "New ride requests auto-appear here (no copy/paste needed)."
++                  : "No available ride requests right now."}
++              </div>
+               <Button onClick={acceptRide} disabled={!rideId}>
+                 Accept
+               </Button>
+@@ -236,7 +272,16 @@
+                 <tbody>
+                   {rides.map((r) => (
+                     <tr key={r.id} className="border-b last:border-b-0">
+-                      <td className="py-3 pr-3 font-mono text-xs">{r.id}</td>
++                      <td className="py-3 pr-3 font-mono text-xs">
++                        <button
++                          type="button"
++                          className="underline hover:no-underline"
++                          onClick={() => setStatusRideId(r.id)}
++                          title="Use this Ride ID for status updates"
++                        >
++                          {r.id}
++                        </button>
++                      </td>
+                       <td className="py-3 pr-3"><StatusPill status={r.status} /></td>
+                       <td className="py-3 pr-3 text-slate-700">
+                         {r.rider ? (r.rider.name || r.rider.email || r.rider.id) : (r.riderId || "—")}

@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, session } from "../api";
 import { Layout, Card, Button, Input, Select } from "../ui/Layout";
 import { StatusPill } from "../ui/StatusPill";
 import { getSocket } from "../socket";
 import { geocodeAddress } from "../utils/geocode";
+import { useNavigate } from "react-router-dom";
 
 export default function DriverPage() {
+  const navigate = useNavigate();
+
   const [rides, setRides] = useState([]);
+  const [availableRides, setAvailableRides] = useState([]);
   const [online, setOnline] = useState(false);
   const [rideId, setRideId] = useState("");
   const [statusRideId, setStatusRideId] = useState("");
@@ -16,9 +20,28 @@ export default function DriverPage() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
+  // Guard: prevent non-driver roles from using driver-only APIs
+  useEffect(() => {
+    const me = session.me;
+    if (!me?.role) return;
+    if (me.role === "DRIVER") return;
+
+    if (me.role === "RIDER") navigate("/rider", { replace: true });
+    else if (me.role === "ADMIN") navigate("/admin", { replace: true });
+    else navigate("/auth", { replace: true });
+  }, [navigate]);
+
   async function refresh() {
-    const data = await api.myRides();
-    setRides(data.rides);
+    const [my, available] = await Promise.all([
+      api.myRides(),
+      api.driverAvailableRides().catch(() => ({ rides: [] })),
+    ]);
+
+    setRides(my.rides);
+    setAvailableRides(available.rides);
+
+    // Preselect newest ride for quick accept
+    if (!rideId && available.rides?.[0]?.id) setRideId(available.rides[0].id);
   }
 
   useEffect(() => {
@@ -46,14 +69,24 @@ export default function DriverPage() {
       });
     });
 
-    socket.on("ride:new", () => {
-      // optional: refresh().catch(() => {});
+    socket.on("ride:new", (payload) => {
+      const ride = payload?.ride ?? payload;
+      if (!ride?.id) return;
+
+      setAvailableRides((prev) => {
+        if (prev.some((r) => r.id === ride.id)) return prev;
+        return [ride, ...prev];
+      });
+
+      // Auto-select newest ride if nothing selected
+      setRideId((cur) => cur || ride.id);
     });
 
     return () => {
       socket.off("ride:update");
       socket.off("ride:new");
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function goOnline() {
@@ -72,7 +105,7 @@ export default function DriverPage() {
     setMsg("You are offline.");
   }
 
-  // ✅ FIXED: convert typed location -> lat/lng and send to backend
+  // convert typed location -> lat/lng and send to backend
   async function sendLocation() {
     setErr("");
     setMsg("");
@@ -99,11 +132,17 @@ export default function DriverPage() {
     setErr("");
     setMsg("");
 
+    if (!rideId) {
+      setErr("No available ride selected.");
+      return;
+    }
+
     try {
-      // ✅ Use your existing backend driver accept route
       await api.driverAccept({ rideId });
 
       setMsg("Ride accepted.");
+      setStatusRideId(rideId);
+      setAvailableRides((prev) => prev.filter((r) => r.id !== rideId));
       await refresh();
     } catch (e) {
       setErr(e.message || String(e));
@@ -181,12 +220,21 @@ export default function DriverPage() {
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="grid gap-3">
               <div className="font-semibold text-slate-900">Accept ride</div>
-              <Input
-                label="Ride ID"
-                value={rideId}
-                onChange={(e) => setRideId(e.target.value)}
-                placeholder="Paste ride id..."
-              />
+              <Select label="Available rides" value={rideId} onChange={(e) => setRideId(e.target.value)}>
+                <option value="">Select a ride...</option>
+                {availableRides.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.id} — {r.rider?.email || "rider"}
+                  </option>
+                ))}
+              </Select>
+
+              <div className="text-xs text-slate-500">
+                {availableRides.length
+                  ? "New ride requests auto-appear here (no copy/paste needed)."
+                  : "No available ride requests right now."}
+              </div>
+
               <Button onClick={acceptRide} disabled={!rideId}>
                 Accept
               </Button>
@@ -204,7 +252,6 @@ export default function DriverPage() {
                 <option>ARRIVING</option>
                 <option>IN_PROGRESS</option>
                 <option>COMPLETED</option>
-                <option>CHECKED_OUT</option>
                 <option>CANCELLED</option>
               </Select>
               <Button variant="secondary" onClick={updateStatus} disabled={!statusRideId}>
@@ -236,8 +283,19 @@ export default function DriverPage() {
                 <tbody>
                   {rides.map((r) => (
                     <tr key={r.id} className="border-b last:border-b-0">
-                      <td className="py-3 pr-3 font-mono text-xs">{r.id}</td>
-                      <td className="py-3 pr-3"><StatusPill status={r.status} /></td>
+                      <td className="py-3 pr-3 font-mono text-xs">
+                        <button
+                          type="button"
+                          className="underline hover:no-underline"
+                          onClick={() => setStatusRideId(r.id)}
+                          title="Use this Ride ID for status updates"
+                        >
+                          {r.id}
+                        </button>
+                      </td>
+                      <td className="py-3 pr-3">
+                        <StatusPill status={r.status} />
+                      </td>
                       <td className="py-3 pr-3 text-slate-700">
                         {r.rider ? (r.rider.name || r.rider.email || r.rider.id) : (r.riderId || "—")}
                       </td>
